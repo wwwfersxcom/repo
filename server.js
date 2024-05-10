@@ -1,95 +1,93 @@
-const path = require("path");
-let params2 = {
-  greeting: "Hello Form!",
-};
-// Require the fastify framework and instantiate it
+/**
+ * This is the main server script that provides the API endpoints
+ *
+ * Uses sqlite.js to connect to db
+ */
+
 const fastify = require("fastify")({
-  // set this to true for detailed logging:
-  logger: false,
+  // Set this to true for detailed logging:
+  logger: false
 });
 
-// Setup our static files
-fastify.register(require("@fastify/static"), {
-  root: path.join(__dirname, "public"),
-  prefix: "/", // optional: default '/'
-});
-
-// fastify-formbody lets us parse incoming forms
 fastify.register(require("@fastify/formbody"));
 
-// point-of-view is a templating manager for fastify
-fastify.register(require("@fastify/view"), {
-  engine: {
-    handlebars: require("handlebars"),
-  },
+const db = require("./sqlite.js");
+const errorMessage =
+  "Whoops! Error connecting to the database–please try again!";
+
+// OnRoute hook to list endpoints
+const routes = { endpoints: [] };
+fastify.addHook("onRoute", routeOptions => {
+  routes.endpoints.push(routeOptions.method + " " + routeOptions.path);
 });
-let params = {
-  greeting: "Welcome to MySpot!",
-  nav1: "Sign Up!",
-  nav2: "Log In!",
-  welcome: "Sign Up Or Log In For More!",
+
+// Just send some info at the home route
+fastify.get("/", (request, reply) => {
+  const data = {
+    title: "Hello SQLite (blank)",
+    intro: "This is a database-backed API with the following endpoints",
+    routes: routes.endpoints
+  };
+  reply.status(200).send(data);
+});
+
+// Return the chat messages from the database helper script - no auth
+fastify.get("/messages", async (request, reply) => {
+  let data = {};
+  data.chat = await db.getMessages();
+  console.log(data.chat);
+  if(!data.chat) data.error = errorMessage;
+  const status = data.error ? 400 : 200;
+  reply.status(status).send(data);
+});
+
+// Add new message (auth)
+fastify.post("/message", async (request, reply) => {
+  let data = {};
+  const auth = authorized(request.headers.admin_key);
+  if(!auth || !request.body || !request.body.message) data.success = false;
+  else if(auth) data.success = await db.addMessage(request.body.message);
+  const status = data.success ? 201 : auth ? 400 : 401;
+  reply.status(status).send(data);
+});
+
+// Update text for an message (auth)
+fastify.put("/message", async (request, reply) => { 
+  let data = {};
+  const auth = authorized(request.headers.admin_key);
+  if(!auth || !request.body || !request.body.id || !request.body.message) data.success = false;
+  else data.success = await db.updateMessage(request.body.id, request.body.message); 
+  const status = data.success ? 201 : auth ? 400 : 401;
+  reply.status(status).send(data);
+});
+
+// Delete a message (auth)
+fastify.delete("/message", async (request, reply) => {
+  let data = {};
+  const auth = authorized(request.headers.admin_key);
+  if(!auth || !request.query || !request.query.id) data.success = false;
+  else data.success = await db.deleteMessage(request.query.id);
+  const status = data.success ? 201 : auth ? 400 : 401;
+  reply.status(status).send(data);
+});
+
+// Helper function to authenticate the user key
+const authorized = key => {
+  if (
+    !key ||
+    key < 1 ||
+    !process.env.ADMIN_KEY ||
+    key !== process.env.ADMIN_KEY
+  )
+    return false;
+  else return true;
 };
 
-// Our main GET home page route, pulls from src/pages/index.hbs
-fastify.get("/", function (request, reply) {
-  // params is an object we'll pass to our handlebars template
-  // request.query.paramName <-- a querystring example
-  return reply.view("/src/pages/index.hbs", params);
-});
-fastify.get("/signup", function (request, reply) {
-  return reply.view("/src/pages/signup.hbs", params);
-});
-fastify.get("/login", function (request, reply) {
-  return reply.view("/src/pages/login.hbs", params);
-});
-// A POST route to handle form submissions
-fastify.post("/", function (request, reply) {
-  request.body.form;
-  let form = Document.getElementById("form");
-  let email = Document.getElementById("EMAIL");
-  let pass = Document.getElementById("PASS");
-  let conpass = Document.getElementById("CONPASS");
-  let error = Document.getElementById("ERROR");
-  if (window.href == "signup.hbs") {
-    if (
-      email.match(/^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/gi) &&
-      pass.innerText == conpass.innerText
-    ) {
-      return reply.view("/src/pages/main.hbs", params2);
-    } else if (
-      email.match(/^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/gi) != true &&
-      pass.innerText == conpass.innerText
-    ) {
-      error.innerHTML = "Invalid Email";
-    } else if (
-      email.match(/^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/gi) &&
-      pass.innerText != conpass.innerText
-    ) {
-      error.innerHTML = "Passwords Don't Match";
-    } else if (
-      email.match(/^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/gi) != true &&
-      pass.innerText != conpass.innerText
-    ) {
-      error.innerHTML =
-        "Invalid Email and Passwords Don't Match... Were You Born Yesterday??";
-    } else {
-      error.innerHTML = "Bruh.";
-    }
-  }
-  if(window.href == "login.hbs") {
-    if(email.match(/^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/gi)) {
-      
-    }
-  }
-});
 // Run the server and report out to the logs
-fastify.listen(
-  { port: process.env.PORT, host: "0.0.0.0" },
-  function (err, address) {
-    if (err) {
-      console.error(err);
-      process.exit(1);
-    }
-    console.log(`Your app is listening on ${address}`);
+fastify.listen({port:process.env.PORT, host:'0.0.0.0'}, function(err, address) {
+  if (err) {
+    console.error(err);
+    process.exit(1);
   }
-);
+  console.log(`Your app is listening on ${address}`);
+});
